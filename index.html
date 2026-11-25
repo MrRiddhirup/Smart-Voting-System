@@ -1,0 +1,162 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Voting System</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 820px; margin: 30px auto; padding: 0 16px; background: #f6f8fa; color: #1f2328; }
+    .card { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    video, canvas { width: 100%; max-width: 380px; border-radius: 6px; background: #000; display: block; margin: 10px 0; }
+    button, select, input { padding: 8px 12px; margin: 6px 4px 6px 0; border-radius: 6px; border: 1px solid #8c959f; font-size: 14px; }
+    button { background: #1f883d; color: #fff; border-color: #1f883d; cursor: pointer; }
+    button.secondary { background: #57606a; border-color: #57606a; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #d0d7de; padding: 8px; text-align: left; }
+    th { background: #f6f8fa; }
+    .msg { padding: 10px; border-radius: 6px; margin-top: 10px; background: #ddf4ff; }
+  </style>
+</head>
+<body>
+  <h1>🗳️ Smart Voting System</h1>
+  <p>Browser deployment for Netlify. Voter profiles and votes are stored in your browser's local storage.</p>
+
+  <div class="card">
+    <h2>1. Register Voter</h2>
+    <input id="voterId" type="text" placeholder="Enter Voter Card Number" />
+    <button onclick="startCamera()">Start Camera</button>
+    <button class="secondary" onclick="capturePhoto()">Capture Snapshot</button>
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas" width="320" height="240" style="display:none;"></canvas>
+    <img id="snapshot" alt="Captured preview" style="max-width:320px; display:none; border-radius:6px;" />
+    <br />
+    <button onclick="registerVoter()">Save Voter</button>
+    <div id="regStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Cast Vote</h2>
+    <label for="verifyVoter">Select / Enter Registered Voter ID:</label>
+    <input id="verifyVoter" type="text" placeholder="Voter Card Number" />
+    <label for="party">Party:</label>
+    <select id="party">
+      <option value="BJP">BJP</option>
+      <option value="CONGRESS">CONGRESS</option>
+      <option value="AAP">AAP</option>
+      <option value="NOTA">NOTA</option>
+    </select>
+    <button onclick="castVote()">Submit Vote</button>
+    <div id="voteStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>3. Recorded Votes</h2>
+    <button class="secondary" onclick="exportCSV()">Download Votes.csv</button>
+    <button class="secondary" onclick="clearVotes()">Clear Local Votes</button>
+    <table>
+      <thead>
+        <tr><th>Voter ID</th><th>Party</th><th>Date</th><th>Time</th></tr>
+      </thead>
+      <tbody id="votesBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const VOTERS_KEY = "smart_voting_voters_v1";
+    const VOTES_KEY = "smart_voting_votes_v1";
+    let currentSnapshot = "";
+
+    function getVoters() { return JSON.parse(localStorage.getItem(VOTERS_KEY) || "[]"); }
+    function saveVoters(v) { localStorage.setItem(VOTERS_KEY, JSON.stringify(v)); }
+    function getVotes() { return JSON.parse(localStorage.getItem(VOTES_KEY) || "[]"); }
+    function saveVotes(v) { localStorage.setItem(VOTES_KEY, JSON.stringify(v)); }
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        document.getElementById("video").srcObject = stream;
+      } catch (err) {
+        document.getElementById("regStatus").innerHTML = `<div class="msg">Camera error: ${err.message}</div>`;
+      }
+    }
+
+    function capturePhoto() {
+      const video = document.getElementById("video");
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      currentSnapshot = canvas.toDataURL("image/png");
+      const img = document.getElementById("snapshot");
+      img.src = currentSnapshot;
+      img.style.display = "block";
+    }
+
+    function registerVoter() {
+      const id = document.getElementById("voterId").value.trim();
+      if (!id) {
+        document.getElementById("regStatus").innerHTML = `<div class="msg">Enter a Voter Card Number first.</div>`;
+        return;
+      }
+      const voters = getVoters();
+      if (!voters.some(v => v.id.toLowerCase() === id.toLowerCase())) {
+        voters.push({ id, photo: currentSnapshot, registeredAt: new Date().toISOString() });
+        saveVoters(voters);
+      }
+      document.getElementById("verifyVoter").value = id;
+      document.getElementById("regStatus").innerHTML = `<div class="msg">Voter <strong>${id}</strong> registered.</div>`;
+    }
+
+    function castVote() {
+      const id = document.getElementById("verifyVoter").value.trim();
+      const party = document.getElementById("party").value;
+      if (!id) {
+        document.getElementById("voteStatus").innerHTML = `<div class="msg">Enter a Voter Card Number to vote.</div>`;
+        return;
+      }
+      const votes = getVotes();
+      if (votes.some(v => v.voterId.toLowerCase() === id.toLowerCase())) {
+        document.getElementById("voteStatus").innerHTML = `<div class="msg">YOU HAVE ALREADY VOTED.</div>`;
+        return;
+      }
+      const now = new Date();
+      votes.push({
+        voterId: id,
+        party,
+        date: now.toLocaleDateString("en-GB").replace(/\//g, "-"),
+        time: now.toTimeString().split(" ")[0]
+      });
+      saveVotes(votes);
+      renderVotes();
+      document.getElementById("voteStatus").innerHTML = `<div class="msg">Vote recorded for <strong>${party}</strong>.</div>`;
+    }
+
+    function renderVotes() {
+      const tbody = document.getElementById("votesBody");
+      const votes = getVotes();
+      tbody.innerHTML = votes.map(v =>
+        `<tr><td>${v.voterId}</td><td>${v.party}</td><td>${v.date}</td><td>${v.time}</td></tr>`
+      ).join("");
+    }
+
+    function exportCSV() {
+      const votes = getVotes();
+      const rows = [["NAME", "VOTE", "DATE", "TIME"], ...votes.map(v => [v.voterId, v.party, v.date, v.time])];
+      const csv = rows.map(r => r.join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "Votes.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function clearVotes() {
+      localStorage.removeItem(VOTES_KEY);
+      renderVotes();
+    }
+
+    renderVotes();
+  </script>
+</body>
+</html>
